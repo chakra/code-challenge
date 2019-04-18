@@ -1,0 +1,12 @@
+{
+  "name": "utils",
+  "version": "1.0.0",
+  "description": "Utility",
+  "main": "index.js",
+  "author": "CB",
+  "license": "ISC",
+  "dependencies": {
+    "email-validator": "^2.0.4",
+    "is-valid-birthdate": "^0.1.0"
+  }
+}

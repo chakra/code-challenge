@@ -1,0 +1,13 @@
+{
+  "name": "models",
+  "version": "1.0.0",
+  "description": "Models",
+  "main": "index.js",
+  "dependencies": {
+    "pg": "^6.4.2",
+    "pg-hstore": "^2.3.2",
+    "sequelize": "^3.34.0"
+  },
+  "author": "CB",
+  "license": "ISC"
+}

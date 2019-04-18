@@ -1,0 +1,19 @@
+{
+  "name": "getuser",
+  "version": "1.0.0",
+  "description": "Get User",
+  "main": "index.js",
+  "scripts": {
+    "test": "env KEY=test ./node_modules/.bin/mocha --recursive --reporter spec"
+  },
+  "dependencies": {
+    "layer": "file:C:\\Projects\\AEC\\code_challenge\\LambdaLayers\\layers-1.0.0.tar.gz"
+  },
+  "devDependencies": {
+    "chai": "^3.5.0",
+    "mocha": "^2.5.3",
+    "sinon": "^6.3.1"
+  },
+  "author": "CB",
+  "license": "ISC"
+}
