@@ -7,7 +7,7 @@
     "test": "env KEY=test ./node_modules/.bin/mocha --recursive --reporter spec"
   },
   "dependencies": {
-    "layer": "file:C:\\Projects\\AEC\\code_challenge\\LambdaLayers\\layers-1.0.0.tar.gz"
+    "layer": "file:\\Users//CB//Projects//coates//code-challenge//LambdaLayers//layers-1.0.0.tar.gz"
   },
   "devDependencies": {
     "chai": "^3.5.0",

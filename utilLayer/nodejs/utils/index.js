@@ -6,6 +6,6 @@ let isValidBirthdate = require('is-valid-birthdate');
 
 module.exports = {
 	messages,
-	emailValidator,
+	emailvalidator,
 	isValidBirthdate
 }
