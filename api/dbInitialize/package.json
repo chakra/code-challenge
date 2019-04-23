@@ -1,0 +1,11 @@
+{
+    "name": "initialize-db-tables",
+    "version": "1.0.0",
+    "description": "Lambda for initializing DB tables module",
+    "main": "index.js",
+    "author": "CB",
+    "license": "ISC",
+    "engines": {
+        "node": "8.10"
+    }
+}

@@ -1,7 +1,8 @@
 "use strict";
 
-let { User } = require('./user');
+let { User } = require('./model/index');
 let utility = require('util');
+let constants = require('./constants');
 
 function findUser(condition) {
 
