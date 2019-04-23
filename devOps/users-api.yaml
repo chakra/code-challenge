@@ -1,0 +1,476 @@
+
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'User CFT'
+
+Parameters:
+  ProjectName:
+    Default: users
+    Description: Project Name
+    Type: String
+  ParentStackName:
+    Default: users-stack
+    Description: Parent stack name
+    Type: String
+  RDSStackName:
+    Default: rds-stack
+    Description: Postgres RDS stack name
+    Type: String
+  KMSStackName:
+    Default: kms-stack
+    Description: KMS stack name
+    Type: String
+  ReleaseVersion:
+    Default: 1.0.0
+    Type: String
+    Description: Release Version for this deployment
+  Environment:
+    Default: dev
+    Type: String
+    Description: Environment within AWS for this stack
+    AllowedValues:
+      - dev
+      - stg
+      - tst
+      - uat
+      - prd
+  ReleaseS3BucketName:
+    Default: user-cft-resources
+    Type: String
+    Description: The name of the S3 bucket that contains the resources
+  SubDomainName:
+    Default: user
+    Description: Subdomain name for this user new environment
+    Type: String
+  RootDomainName:
+    Default: cftusers.net
+    Description: Top-level or the root domain name for this user new environment
+    Type: String
+  ApiDeploymentStageName:
+    Default: DEV
+    Type: String
+    AllowedPattern: "[a-zA-Z0-9]*"
+    ConstraintDescription: Must contain only alphanumeric characters
+    Description: The stage name for the API deployment
+  ApiGatewayUsagePlanQuotePerMonth:
+    Default: '1000'
+    Type: Number
+    Description: The quota per month for the API gateway Usage Plan
+  LambdaFunctionRuntime:
+    Default: nodejs8.10
+    Description: The runtime settings for all lambda functions
+    Type: String
+  RestApiId:
+    Type: String
+  RootResourceId:
+    Type: String
+
+Resources:
+  ApiGatewayRestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name:
+        Fn::Join:
+          - ''
+          - - Ref: AWS::StackName
+            - "-api-gateway"
+      Description: 'The REST api gateway.'
+      BinaryMediaTypes:
+        - multipart~1form-data
+
+  ApiKeys:
+    DependsOn: ApiGatewayStage
+    Type: AWS::ApiGateway::ApiKey
+    Properties:
+      Name:
+        Fn::Join:
+          - ''
+          - - Ref: ParentStackName
+            - "-api-key"
+      Description: 'Api key for accessing the rest apis.'
+      Enabled: 'true'
+      StageKeys:
+        - RestApiId:
+            Ref: ApiGatewayRestApi
+          StageName:
+            Ref: ApiDeploymentStageName
+  ApiUsagePlan:
+    DependsOn: ApiKeys
+    Type: AWS::ApiGateway::UsagePlan
+    Properties:
+      ApiStages:
+        - ApiId:
+            Ref: ApiGatewayRestApi
+          Stage:
+            Ref: ApiDeploymentStageName
+      UsagePlanName:
+        Fn::Join:
+          - ''
+          - - Ref: AWS::StackName
+            - "-UsagePlan"
+  ApiUsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId:
+        Ref: ApiKeys
+      KeyType: API_KEY
+      UsagePlanId:
+        Ref: ApiUsagePlan
+  ApiGatewayStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      StageName:
+        Ref: ApiDeploymentStageName
+      Description:
+        Fn::Join:
+          - ''
+          - - 'The stage to perform deployment of '
+            - Ref: ProjectName
+            - " API endpoints"
+      RestApiId:
+        Ref: ApiGatewayRestApi
+      DeploymentId:
+        Ref: ApiGatewayDeployment2301201901
+  ApiGatewayDeployment2301201901:
+    DependsOn:
+      - 401UnauthorizedApiGatewayResponse
+      - CreateUserApiMethod
+      - GetUserApiMethod
+      - DeleteUserApiMethod
+     # - DBInitApiMethod
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+  401UnauthorizedApiGatewayResponse:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      RestApiId:
+        Ref: ApiGatewayRestApi
+      StatusCode: '401'
+      ResponseType: UNAUTHORIZED
+      ResponseTemplates:
+        application/json:
+          Fn::Join:
+            - ''
+            - - "{"
+              - "\t\"message\" : $context.error.messageString,\n"
+              - "}"
+
+
+  UsersResource:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ParentId: !GetAtt
+        - ApiGatewayRestApi
+        - RootResourceId
+      PathPart: users
+
+  LambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Join
+        - ''
+        - - !Ref ParentStackName
+          - _LambdaExecutionRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole'
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaRole'
+      Path: /service-role/
+      Policies:
+        -
+          PolicyName: 'PostgresInstanceAccessPolicy'
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Effect: Allow
+                Action: 'rds:*'
+                Resource: !Join ['', ['arn:aws:rds:',!Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':db', {'Fn::ImportValue': 'rds-stack-DBInstance'}]]
+        -
+          PolicyName: 'CustomerManagedKeyAccessPolicy'
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Effect: Allow
+                Action:
+                  - 'kms:Encrypt'
+                  - 'kms:Decrypt'
+                  - 'kms:ReEncrypt'
+                  - 'kms:GenerateDataKey*'
+                  - 'kms:DescribeKey'
+                Resource: {'Fn::ImportValue': 'rds-stack-DBKMSKey'}
+        -
+          PolicyName: 'SecretsManagerAccessPolicy'
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Effect: Allow
+                Action: 'secretsManager:*'
+                Resource: {'Fn::ImportValue':'rds-stack-RDSSecretKey'}
+
+  ModelsLayer:
+    Type: "AWS::Lambda::LayerVersion"
+    Properties:
+      CompatibleRuntimes:
+        - !Ref LambdaFunctionRuntime
+      Content:
+        S3Bucket: !Ref ReleaseS3BucketName
+        S3Key: !Join
+          - ''
+          - - !Ref ReleaseVersion
+            - /layers/models.zip
+      Description: Models layer
+      LayerName: models
+      LicenseInfo: ISC
+
+  UtilsLayer:
+    Type: "AWS::Lambda::LayerVersion"
+    Properties:
+      CompatibleRuntimes:
+        - !Ref LambdaFunctionRuntime
+      Content:
+        S3Bucket: !Ref ReleaseS3BucketName
+        S3Key: !Join
+          - ''
+          - - !Ref ReleaseVersion
+            - /layers/utils.zip
+      Description: Utils Layer
+      LayerName: utils
+      LicenseInfo: ISC
+
+  LambdaCreateUser:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: !Join
+        - ''
+        - - !Ref ParentStackName
+          - '-create-user'
+      Description: A lambda function for create user
+      Runtime: !Ref LambdaFunctionRuntime
+      Handler: index.handler
+      Role: !GetAtt
+        - LambdaExecutionRole
+        - Arn
+      Code:
+        S3Bucket: !Ref ReleaseS3BucketName
+        S3Key: !Join
+          - ''
+          - - !Ref ReleaseVersion
+            - /create-user-service.zip
+      Environment:
+        Variables:
+          SECRET_NAME: {'Fn::ImportValue': 'rds-stack-RDSSecretKey'}
+      VpcConfig:
+        SecurityGroupIds:
+          - !GetAtt
+            - VPCLambdaSecurityGroup
+            - GroupId
+        SubnetIds: {'Fn::ImportValue': 'users-stack-SubnetsPublic'}
+
+  CreateUserApiMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      HttpMethod: POST
+      ResourceId: !Ref UsersResource
+      RestApiId: !Ref ApiGatewayRestApi
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        RequestTemplates:
+          application/json: !Join
+            - ''
+            - - '{'
+              - "\t\"context\" : {\n"
+              - "\t\t\"action-name\" : \"CreateUserApiMethod\",\n"
+              - "\t\t\"sub\" : \"$context.authorizer.claims.sub\",\n"
+              - "\t\t\"email\" : \"$context.authorizer.claims.email\"\n"
+              - "\t}\n"
+              - '}'
+        IntegrationResponses:
+          - StatusCode: '200'
+        Uri: !Join
+          - ''
+          - - 'arn:aws:apigateway:'
+            - !Ref 'AWS::Region'
+            - ':lambda:path/2015-03-31/functions/'
+            - !GetAtt
+              - LambdaCreateUser
+              - Arn
+            - /invocations
+      MethodResponses:
+        - StatusCode: '200'
+
+  LambdaGetUser:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: !Join
+        - ''
+        - - !Ref ParentStackName
+          - '-get-user'
+      Description: A lambda function for fetching user
+      Runtime: !Ref LambdaFunctionRuntime
+      Handler: index.handler
+      Role: !GetAtt
+        - LambdaExecutionRole
+        - Arn
+      Code:
+        S3Bucket: !Ref ReleaseS3BucketName
+        S3Key: !Join
+          - ''
+          - - !Ref ReleaseVersion
+            - /get-user-service.zip
+      Environment:
+        Variables:
+          SECRET_NAME: {'Fn::ImportValue': 'rds-stack-RDSSecretKey'}
+      VpcConfig:
+        SecurityGroupIds:
+          - !GetAtt
+            - VPCLambdaSecurityGroup
+            - GroupId
+        SubnetIds: {'Fn::ImportValue': 'users-stack-SubnetsPublic'}
+
+  GetUserApiMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      HttpMethod: GET
+      ResourceId: !Ref UsersResource
+      RestApiId: !Ref ApiGatewayRestApi
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: GET
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        RequestTemplates:
+          application/json: !Join
+            - ''
+            - - '{'
+              - "\t\"context\" : {\n"
+              - "\t\t\"action-name\" : \"GetUserApiMethod\",\n"
+              - "\t\t\"sub\" : \"$context.authorizer.claims.sub\",\n"
+              - "\t\t\"email\" : \"$context.authorizer.claims.email\"\n"
+              - "\t}\n"
+              - '}'
+        IntegrationResponses:
+          - StatusCode: '200'
+        Uri: !Join
+          - ''
+          - - 'arn:aws:apigateway:'
+            - !Ref 'AWS::Region'
+            - ':lambda:path/2015-03-31/functions/'
+            - !GetAtt
+              - LambdaGetUser
+              - Arn
+            - /invocations
+      MethodResponses:
+        - StatusCode: '200'
+
+  LambdaDeleteUser:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: !Join
+        - ''
+        - - !Ref ParentStackName
+          - '-delete-user'
+      Description: A lambda function for deleting user
+      Runtime: !Ref LambdaFunctionRuntime
+      Handler: index.handler
+      Role: !GetAtt
+        - LambdaExecutionRole
+        - Arn
+      Code:
+        S3Bucket: !Ref ReleaseS3BucketName
+        S3Key: !Join
+          - ''
+          - - !Ref ReleaseVersion
+            - /delete-user-service.zip
+      Environment:
+        Variables:
+          SECRET_NAME: {'Fn::ImportValue': 'rds-stack-RDSSecretKey'}
+      VpcConfig:
+        SecurityGroupIds:
+          - !GetAtt
+            - VPCLambdaSecurityGroup
+            - GroupId
+        SubnetIds: {'Fn::ImportValue': 'users-stack-SubnetsPublic'}
+
+  DeleteUserApiMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      HttpMethod: DELETE
+      ResourceId: !Ref UsersResource
+      RestApiId: !Ref ApiGatewayRestApi
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: DELETE
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        RequestTemplates:
+          application/json: !Join
+            - ''
+            - - '{'
+              - "\t\"context\" : {\n"
+              - "\t\t\"action-name\" : \"DeleteUserApiMethod\",\n"
+              - "\t\t\"sub\" : \"$context.authorizer.claims.sub\",\n"
+              - "\t\t\"email\" : \"$context.authorizer.claims.email\"\n"
+              - "\t}\n"
+              - '}'
+        IntegrationResponses:
+          - StatusCode: '200'
+        Uri: !Join
+          - ''
+          - - 'arn:aws:apigateway:'
+            - !Ref 'AWS::Region'
+            - ':lambda:path/2015-03-31/functions/'
+            - !GetAtt
+              - LambdaGetUser
+              - Arn
+            - /invocations
+      MethodResponses:
+        - StatusCode: '200'
+
+
+
+  VPCRDSSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    DependsOn: VPCLambdaSecurityGroup
+    Properties:
+      GroupDescription: !Join
+        - ''
+        - - !Ref ParentStackName
+          - ' VPC Security Group for RDS'
+      VpcId: {'Fn::ImportValue': 'users-stack-VPC'}
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ''
+            - - !Ref ParentStackName
+              - _RDS_SecurityGroup
+
+  VPCLambdaSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: !Join
+        - ''
+        - - !Ref ParentStackName
+          - ' VPC Security Group for Lambda'
+      VpcId: {'Fn::ImportValue': 'users-stack-VPC'}
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ''
+            - - !Ref ParentStackName
+              - _Lambda_SecurityGroup
+

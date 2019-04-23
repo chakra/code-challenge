@@ -1,0 +1,267 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'RDS Postgres'
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+      - Label:
+          default: 'Parent Stacks'
+        Parameters:
+          - ParentVPCStack
+          - ParentKmsKeyStack
+      - Label:
+          default: 'RDS Parameters'
+        Parameters:
+          - DBAllocatedStorage
+          - DBInstanceClass
+          - DBName
+          - DBBackupRetentionPeriod
+          - DBMasterUsername
+          - DBMasterUserPassword
+          - DBMultiAZ
+          - SubDomainNameWithDot
+          - PreferredBackupWindow
+          - PreferredMaintenanceWindow
+Parameters:
+  ParentVPCStack:
+    Description: 'Stack name of parent VPC stack based on vpc-2azs.yaml template.'
+    Type: String
+  ParentKmsKeyStack:
+    Description: 'Optional Stack name of parent KMS key stack based on kms-key.yaml template'
+    Type: String
+    Default: ''
+  DBAllocatedStorage:
+    Description: 'The allocated storage size, specified in GB'
+    Type: Number
+    Default: 5
+    MinValue: 5
+    MaxValue: 16384
+  DBInstanceClass:
+    Description: 'The instance type of database server.'
+    Type: String
+    Default: 'db.t2.small'
+  DBEngineVersion:
+    Description: Enter RDS postgres Version
+    Type: Number
+    Default: 11.1
+  DBName:
+    Description: 'Name of the database'
+    Type: String
+    Default: 'users'
+  DBBackupRetentionPeriod:
+    Description: 'The number of days to keep snapshots of the database.'
+    Type: Number
+    MinValue: 0
+    MaxValue: 35
+    Default: 30
+  DBMasterUsername:
+    Description: 'The master user name for the DB instance'
+    Type: String
+    Default: master
+  DBPort:
+    Description: Enter RDS Listening TCP Port number.
+    Type: Number
+    Default: '5432'
+  DBMasterUserPassword:
+    Description: 'The master password for the DB instance'
+    Type: String
+    NoEcho: true
+    Default: ''
+  DBMultiAZ:
+    Description: 'Specifies if the database instance is deployed to multiple Availability Zones for HA.'
+    Type: String
+    Default: true
+    AllowedValues: [true, false]
+  SubDomainNameWithDot:
+    Description: 'Name that is used to create the DNS entry with trailing dot, e.g. §{SubDomainNameWithDot}§{HostedZoneName}. Leave blank for naked (or apex and bare) domain. Requires ParentZoneStack parameter!'
+    Type: String
+    Default: 'postgres.'
+  PreferredBackupWindow:
+    Description: 'The daily time range in UTC during which you want to create automated backups.'
+    Type: String
+    Default: '09:54-10:24'
+  PreferredMaintenanceWindow:
+    Description: The weekly time range (in UTC) during which system maintenance can occur.
+    Type: String
+    Default: 'sat:07:00-sat:07:30'
+Conditions:
+  HasKmsKey: !Not [!Equals [!Ref ParentKmsKeyStack, '']]
+Resources:
+  DatabaseSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: !Ref 'AWS::StackName'
+      VpcId: {'Fn::ImportValue': !Sub '${ParentVPCStack}-VPC'}
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+
+  DBSubnetGroup:
+    Type: 'AWS::RDS::DBSubnetGroup'
+    Properties:
+      DBSubnetGroupDescription: !Ref 'AWS::StackName'
+      SubnetIds: !Split [',', {'Fn::ImportValue': !Sub '${ParentVPCStack}-SubnetsPrivate'}]
+
+  PostgresDBKMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      KeyPolicy:
+        Version: 2012-10-17
+        Id: !Join
+          - ''
+          - - !Ref 'AWS::StackName'
+            - '-db-key'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Join
+                - ''
+                - - 'arn:aws:iam::'
+                  - !Ref 'AWS::AccountId'
+                  - ':root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: Allow access for Key Administrators
+            Effect: Allow
+            Principal:
+              AWS: !Join
+                - ''
+                - - 'arn:aws:iam::'
+                  - !Ref 'AWS::AccountId'
+                  - ':root'
+            Action:
+              - 'kms:Create*'
+              - 'kms:Describe*'
+              - 'kms:Enable*'
+              - 'kms:List*'
+              - 'kms:Put*'
+              - 'kms:Update*'
+              - 'kms:Revoke*'
+              - 'kms:Disable*'
+              - 'kms:Get*'
+              - 'kms:Delete*'
+              - 'kms:TagResource*'
+              - 'kms:UntagResource*'
+              - 'kms:ScheduleKeyDeletion'
+              - 'kms:CancelKeyDeletion'
+            Resource: '*'
+
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ''
+            - - !Ref 'AWS::StackName'
+              - _DBKMSKey
+
+  RDSSecretKey:
+    Type: 'AWS::SecretsManager::Secret'
+    Properties:
+      Name: !Join
+        - ''
+        - - !Ref 'AWS::StackName'
+          - 'rds-secret'
+      Description: !Join
+        - ''
+        - - 'Secret key for postgres instance of '
+          - !Ref 'AWS::StackName'
+      KmsKeyId: !Ref PostgresDBKMSKey
+      GenerateSecretString:
+        SecretStringTemplate: !Join
+          - ''
+          - - '{"username":"'
+            - !Ref DBMasterUsername
+            - '","db_pool_max": 10, "db_pool_min": 0, "db_pool_idle_timeout_millis": 30000}'
+        GenerateStringKey: 'password'
+        PasswordLength: 16
+        ExcludePunctuation: true
+        ExcludeCharacters: '"@/\'
+
+  RDSSecretInstanceAttachment:
+    Type: "AWS::SecretsManager::SecretTargetAttachment"
+    Properties:
+      SecretId: !Ref RDSSecretKey
+      TargetType: AWS::RDS::DBInstance
+      TargetId: !Ref PostgresDBInstance
+
+  PostgresDBInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Join
+        - ''
+        - - !Ref 'AWS::StackName'
+          - 'postgres-db-instance'
+      DBInstanceClass: !Ref DBInstanceClass
+      DBName: !Ref DBName
+      MasterUsername: !Join ['', ['{{resolve:secretsmanager:', !Ref RDSSecretKey, ':SecretString:username}}' ]]
+      MasterUserPassword: !Join [ '', ['{{resolve:secretsmanager:', !Ref RDSSecretKey, ':SecretString:password}}}' ]]
+      VPCSecurityGroups:
+        - !GetAtt
+          - DatabaseSecurityGroup
+          - GroupId
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      AllocatedStorage: !Ref DBAllocatedStorage
+      BackupRetentionPeriod: '7'
+      Engine: postgres
+      EngineVersion: !Ref DBEngineVersion
+      MultiAZ: !Ref DBMultiAZ
+      KmsKeyId: !Ref PostgresDBKMSKey
+      Port: !Ref DBPort
+      StorageType: gp2
+      StorageEncrypted: true
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ''
+            - - !Ref 'AWS::StackName'
+              - _DBInstance
+    DeletionPolicy: Snapshot
+
+
+Outputs:
+  TemplateID:
+    Description: 'template id.'
+    Value: 'postgres-db'
+  TemplateVersion:
+    Description: 'template version.'
+    Value: '__VERSION__'
+  StackName:
+    Description: 'Stack name.'
+    Value: !Sub '${AWS::StackName}'
+  InstanceName:
+    Description: 'The name of the database instance.'
+    Value: !Ref PostgresDBInstance
+    Export:
+      Name: !Sub '${AWS::StackName}-InstanceName'
+  DNSName:
+    Description: 'The connection endpoint for the database.'
+    Value: !GetAtt 'PostgresDBInstance.Endpoint.Address'
+    Export:
+      Name: !Sub '${AWS::StackName}-DNSName'
+  UserName:
+    Description: 'User name'
+    Value: !Sub '${DBMasterUsername}'
+    Export:
+      Name: !Sub '${AWS::StackName}-UserName'
+  DBPort:
+    Description: 'DB port'
+    Value: !Sub '${DBPort}'
+    Export:
+      Name: !Sub '${AWS::StackName}-DBPort'
+  DBInstance:
+    Description: 'Postgres DB Instance'
+    Value: !Ref PostgresDBInstance
+    Export:
+      Name: !Sub '${AWS::StackName}-DBInstance'
+  PostgresDBKMSKey:
+    Description: 'Postgres DBKMSKEY'
+    Value: !Ref PostgresDBKMSKey
+    Export:
+      Name: !Sub '${AWS::StackName}-DBKMSKey'
+  RDSSecretKey:
+    Description: 'RDS Secret Key'
+    Value: !Ref RDSSecretKey
+    Export:
+      Name: !Sub '${AWS::StackName}-RDSSecretKey'
+
+
