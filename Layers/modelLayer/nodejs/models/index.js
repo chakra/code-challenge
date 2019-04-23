@@ -33,8 +33,8 @@ function deleteUser(condition) {
 		});
 }
 
-function createUser(condition) {
-	let user = User.create(condition)
+function createUser(object) {
+	let user = User.create(object)
 		.catch( (err) => {
 			throw (
 				{
@@ -50,5 +50,5 @@ function createUser(condition) {
 module.exports = {
 	findUser: (condition) => findUser,
 	deleteUser: (condition) => deleteUser,
-	createUser: (condition) => createUser
+	createUser: (object) => createUser
 }

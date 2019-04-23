@@ -25,15 +25,15 @@ exports.handler = (event, context, callback) => {
 const sendResponse = (event, context, responseStatus, responseData, callback) => {
     console.log(responseStatus, responseData);
 
-  //  if (event.StackId) {
-   //     IpUtils.CFNresponse.send(event, context, responseStatus, responseData); // triggerd by Cloudformation
-  //  } else {
-        context.callbackWaitsForEmptyEventLoop = false; // triggered manually
+   if (event.StackId) {
+       IpUtils.CFNresponse.send(event, context, responseStatus, responseData); // triggerd by Cloudformation
+  } else {
+        //context.callbackWaitsForEmptyEventLoop = false; // triggered manually
         if (responseData.error) {
             callback(responseData);
         } else {
             callback(null, responseData);
         }
-  //  }
+   }
 
 };
