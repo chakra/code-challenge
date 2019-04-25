@@ -29,7 +29,7 @@ async function findUser(condition) {
             throw (
                 {
                     code: err.statusCode || 501,
-                    body: JSON.stringify(utility.format('DATABASE_ERROR: [%s] [%s], Error Thrown [%s]', 'select', 'USER', error))
+                    body: JSON.stringify(utility.format('DATABASE_ERROR: [%s] [%s], Error Thrown [%s]', 'select', 'USER', err))
                 }
             )
         });

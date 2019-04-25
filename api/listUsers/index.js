@@ -1,17 +1,13 @@
-'use strict';
-
-let { User } = require('/opt/nodejs/models');
+let {User} = require('/opt/nodejs/models');
 let utility = require('util');
 
-
-exports.handler = async (event, context) => {
+exports.handler = async (event) => {
 
     try {
-        let id = event.pathParameters.id;
-        let user = await deleteUser(id);
+        let user = await listUsers();
         return await readResponse( 200, JSON.stringify(user));
     } catch (err) {
-        console.log(utility.format('Error thrown: %s %s', err.statusCode, err));
+        console.log(utility.format('Error throws %s %s', err.statusCode, err));
         return `Internal Server ERROR occurred`;
     }
 
@@ -26,14 +22,16 @@ async function readResponse(code, body) {
     return res;
 }
 
-async function deleteUser(condition) {
-    await User.findAndDelete(condition)
+async function listUsers() {
+    let users = await User.findAll()
         .catch((err) => {
             throw (
                 {
                     code: err.statusCode || 501,
-                    body: JSON.stringify(utility.format('DATABASE_ERROR: [%s] [%s], Error Thrown [%s]', 'delete', 'USER', err))
+                    body: JSON.stringify(utility.format('DATABASE_ERROR: [%s] [%s], Error Thrown [%s]', 'list', 'USERS', err))
                 }
             )
         });
+
+    return users;
 }

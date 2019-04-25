@@ -1,0 +1,26 @@
+{
+  "title": "USER SCHEMA",
+  "type": "object",
+  "description": "Schema for validating the user input",
+  "properties": {
+      "id": {
+      "type": "number",
+      "description": "id"
+    },
+    "name": {
+      "type": "string",
+      "description": "name"
+    },
+    "email": {
+      "type": "string",
+      "description": "email"
+    },
+    "dob": {
+      "type": "string",
+      "description": "date of birth"
+    }
+  },
+
+  "required": ["name", "email", "dob"]
+
+}
