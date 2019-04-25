@@ -23,10 +23,10 @@ Metadata:
           - PreferredMaintenanceWindow
 Parameters:
   ParentVPCStack:
-    Description: 'Stack name of parent VPC stack based on vpc-2azs.yaml template.'
+    Description: 'Stack name of parent VPC stack based on vpc-2azs.yaml template. [users-stack]'
     Type: String
   ParentKmsKeyStack:
-    Description: 'Optional Stack name of parent KMS key stack based on kms-key.yaml template'
+    Description: 'Optional Stack name of parent KMS key stack based on kms-key.yaml template. [kms-stack]'
     Type: String
     Default: ''
   DBAllocatedStorage:

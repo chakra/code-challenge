@@ -1,0 +1,188 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'State: RDS Postgres'
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+      - Label:
+          default: 'Parent Stacks'
+        Parameters:
+          - ParentVPCStack
+          - ParentKmsKeyStack
+      - Label:
+          default: 'RDS Parameters'
+        Parameters:
+          - DBAllocatedStorage
+          - DBInstanceClass
+          - DBName
+          - DBBackupRetentionPeriod
+          - DBMasterUsername
+          - DBMasterUserPassword
+          - DBMultiAZ
+Parameters:
+  ParentVPCStack:
+    Description: 'Stack name of parent VPC stack based on vpc/vpc-*azs.yaml template.'
+    Type: String
+  ParentKmsKeyStack:
+    Description: 'Optional Stack name of parent KMS key stack based on security/kms-key.yaml template (ignored when DBSnapshotIdentifier is set, value used from snapshot).'
+    Type: String
+    Default: ''
+  DBAllocatedStorage:
+    Description: 'The allocated storage size, specified in GB (ignored when DBSnapshotIdentifier is set, value used from snapshot).'
+    Type: Number
+    Default: 5
+    MinValue: 5
+    MaxValue: 16384
+  DBInstanceClass:
+    Description: 'The instance type of database server.'
+    Type: String
+    Default: 'db.t2.micro'
+  DBName:
+    Description: 'Name of the database (ignored when DBSnapshotIdentifier is set, value used from snapshot).'
+    Type: String
+    Default: ''
+  DBBackupRetentionPeriod:
+    Description: 'The number of days to keep snapshots of the database.'
+    Type: Number
+    MinValue: 0
+    MaxValue: 35
+    Default: 30
+  DBMasterUsername:
+    Description: 'The master user name for the DB instance (ignored when DBSnapshotIdentifier is set, value used from snapshot).'
+    Type: String
+    Default: master
+  DBMasterUserPassword:
+    Description: 'The master password for the DB instance (ignored when DBSnapshotIdentifier is set, value used from snapshot).'
+    Type: String
+    NoEcho: true
+    Default: ''
+  DBPort:
+    Description: 'DB Port'
+    Type: Number
+    Default: 5432
+  DBMultiAZ:
+    Description: 'Specifies if the database instance is deployed to multiple Availability Zones for HA.'
+    Type: String
+    Default: true
+    AllowedValues: [true, false]
+  DBEngineVersion:
+    Description: 'DB Engine Version'
+    Type: String
+    Default: '11.1'
+  ParentStackName:
+    Description: 'Parent Stack Name'
+    Type: String
+    Default: users-stack
+
+Conditions:
+  HasKmsKey: !Not [!Equals [!Ref ParentKmsKeyStack, '']]
+Resources:
+  DBSubnetGroup:
+    Type: 'AWS::RDS::DBSubnetGroup'
+    Properties:
+      DBSubnetGroupDescription: !Ref 'AWS::StackName'
+      SubnetIds: !Split [',', {'Fn::ImportValue': !Sub '${ParentVPCStack}-SubnetsPrivate'}]
+  DBInstance:
+    Type: 'AWS::RDS::DBInstance'
+    Properties:
+      AllowMajorVersionUpgrade: false
+      AutoMinorVersionUpgrade: true
+      BackupRetentionPeriod: !Ref DBBackupRetentionPeriod
+      CopyTagsToSnapshot: true
+      AllocatedStorage: !Ref DBAllocatedStorage
+      DBInstanceClass: !Ref DBInstanceClass
+      DBName: !Ref DBName
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      Engine: postgres
+      EngineVersion: !Ref DBEngineVersion
+      MasterUsername: !Ref DBMasterUsername
+      MasterUserPassword: !Ref DBMasterUserPassword
+      MultiAZ: !Ref DBMultiAZ
+      VPCSecurityGroups:
+        VPCSecurityGroups:
+          - !GetAtt
+            - VPCRDSSecurityGroup
+            - GroupId
+  VPCLambdaSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: !Join
+        - ''
+        - - !Ref ParentStackName
+          - ' VPC Security Group for Lambda'
+      VpcId: {'Fn::ImportValue': !Sub '${ParentStackName}-VPC'}
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ''
+            - - !Ref ParentStackName
+              - _Lambda_SecurityGroup
+  VPCRDSSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    DependsOn: VPCLambdaSecurityGroup
+    Properties:
+      GroupDescription: !Join
+        - ''
+        - - !Ref ParentStackName
+          - ' VPC Security Group for RDS'
+      VpcId: {'Fn::ImportValue': !Sub '${ParentStackName}-VPC'}
+      Tags:
+        - Key: Name
+          Value: !Join
+            - ''
+            - - !Ref ParentStackName
+              - _RDS_SecurityGroup
+  VPCRDSSecurityGroupIngress:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Properties:
+      Description: 'Ingress rule to accept connections from Lambda functions'
+      IpProtocol: 'tcp'
+      FromPort: !Ref DBPort
+      ToPort: !Ref DBPort
+      SourceSecurityGroupId: !Ref VPCLambdaSecurityGroup
+      GroupId: !Ref VPCRDSSecurityGroup
+  VPCRDSSecurityGroupEgress:
+    Type: 'AWS::EC2::SecurityGroupEgress'
+    Properties:
+      Description: 'Egress rule to restrict outbound to RDS SG only, effectively deny all outbound traffic'
+      IpProtocol: '-1'
+      DestinationSecurityGroupId: !Ref VPCRDSSecurityGroup
+      GroupId: !Ref VPCRDSSecurityGroup
+  VPCLambdaSecurityGroupEgress:
+    Type: 'AWS::EC2::SecurityGroupEgress'
+    Properties:
+      Description: 'Egress rule to allow connects to RDS'
+      IpProtocol: 'tcp'
+      FromPort: !Ref DBPort
+      ToPort: !Ref DBPort
+      DestinationSecurityGroupId: !Ref VPCRDSSecurityGroup
+      GroupId: !Ref VPCLambdaSecurityGroup
+
+Outputs:
+  StackName:
+    Description: 'Stack name.'
+    Value: !Sub '${AWS::StackName}'
+  InstanceName:
+    Description: 'The name of the database instance.'
+    Value: !Ref DBInstance
+    Export:
+      Name: !Sub '${AWS::StackName}-InstanceName'
+  DNSName:
+    Description: 'The connection endpoint for the database.'
+    Value: !GetAtt 'DBInstance.Endpoint.Address'
+    Export:
+      Name: !Sub '${AWS::StackName}-DNSName'
+  DBUsername:
+    Description: 'The connection db username.'
+    Value: !Ref DBMasterUsername
+    Export:
+      Name: !Sub '${AWS::StackName}-DBUsername'
+  DBPassword:
+    Description: 'The connection db password.'
+    Value: !Ref DBMasterUserPassword
+    Export:
+      Name: !Sub '${AWS::StackName}-DBPassword'
+  DBName:
+    Description: 'DB Name.'
+    Value: !Ref DBName
+    Export:
+      Name: !Sub '${AWS::StackName}-DBName'
