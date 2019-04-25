@@ -44,11 +44,23 @@ function initializeSequelize() {
             operatorsAliases: Sequelize.Op,
 
             pool: {
-                max: process.env.DB_POOL_MAX,
-                min: process.env.DB_POOL_MIN,
+                max: 15,
+                min: 3,
                 acquire: 30000,
-                idle: process.env.DB_POOL_IDLE_TIMEOUT_MILLIS
-            }
+                idle: 640000
+            },
+
+            dialectOptions: {
+                useUTC: false, //for reading from database
+                dateStrings: true,
+                typeCast: function (field, next) { // for reading from database
+                    if (field.type === 'DATETIME') {
+                        return field.string()
+                    }
+                    return next()
+                },
+            },
+            timezone: '+10:00'
         });
     }
 

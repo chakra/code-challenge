@@ -1,4 +1,3 @@
-
 ---
 AWSTemplateFormatVersion: '2010-09-09'
 Description: 'User CFT'
@@ -64,6 +63,28 @@ Parameters:
     Type: String
   RootResourceId:
     Type: String
+  validatorName:
+    Type: String
+    Default: user
+  validateRequestBody:
+    Type: String
+    Default: true
+  DBDialect:
+    Type: String
+    Default: 'postgres'
+  DBPort:
+    Type: Number
+    Default: 5432
+  DBPOOLMAX:
+    Type: Number
+    Default: 5
+  DBPOOLMIN:
+    Type: Number
+    Default: 1
+  DBPOOLIDLETIMEOUTMILLIS:
+    Type: Number
+    Default: 10000
+
 
 Resources:
   ApiGatewayRestApi:
@@ -137,7 +158,7 @@ Resources:
       - CreateUserApiMethod
       - GetUserApiMethod
       - DeleteUserApiMethod
-     # - DBInitApiMethod
+      # - DBInitApiMethod
     Type: AWS::ApiGateway::Deployment
     Properties:
       RestApiId: !Ref ApiGatewayRestApi
@@ -166,6 +187,13 @@ Resources:
         - RootResourceId
       PathPart: users
 
+  UsersIdResource:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ParentId: !Ref UsersResource
+      PathPart: "{id}"
+
   LambdaExecutionRole:
     Type: 'AWS::IAM::Role'
     Properties:
@@ -185,39 +213,7 @@ Resources:
         - 'arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole'
         - 'arn:aws:iam::aws:policy/service-role/AWSLambdaRole'
       Path: /service-role/
-      Policies:
-        -
-          PolicyName: 'PostgresInstanceAccessPolicy'
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              -
-                Effect: Allow
-                Action: 'rds:*'
-                Resource: !Join ['', ['arn:aws:rds:',!Ref 'AWS::Region', ':', !Ref 'AWS::AccountId', ':db', {'Fn::ImportValue': 'rds-stack-DBInstance'}]]
-        -
-          PolicyName: 'CustomerManagedKeyAccessPolicy'
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              -
-                Effect: Allow
-                Action:
-                  - 'kms:Encrypt'
-                  - 'kms:Decrypt'
-                  - 'kms:ReEncrypt'
-                  - 'kms:GenerateDataKey*'
-                  - 'kms:DescribeKey'
-                Resource: {'Fn::ImportValue': 'rds-stack-DBKMSKey'}
-        -
-          PolicyName: 'SecretsManagerAccessPolicy'
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              -
-                Effect: Allow
-                Action: 'secretsManager:*'
-                Resource: {'Fn::ImportValue':'rds-stack-RDSSecretKey'}
+
 
   ModelsLayer:
     Type: "AWS::Lambda::LayerVersion"
@@ -249,8 +245,16 @@ Resources:
       LayerName: utils
       LicenseInfo: ISC
 
+  RequestValidator:
+    Type: AWS::ApiGateway::RequestValidator
+    Properties:
+      Name: !Ref validatorName
+      RestApiId: !Ref ApiGatewayRestApi
+      ValidateRequestBody: !Ref validateRequestBody
+
   LambdaCreateUser:
     Type: 'AWS::Lambda::Function'
+    DependsOn: [ModelsLayer, UtilsLayer]
     Properties:
       FunctionName: !Join
         - ''
@@ -268,15 +272,26 @@ Resources:
           - ''
           - - !Ref ReleaseVersion
             - /create-user-service.zip
+      Layers: [!Ref ModelsLayer, !Ref UtilsLayer]
       Environment:
         Variables:
-          SECRET_NAME: {'Fn::ImportValue': 'rds-stack-RDSSecretKey'}
+          DB_NAME: {'Fn::ImportValue': 'postgres-rds-stack-DBName'}
+          DB_PASSWORD: {'Fn::ImportValue': 'postgres-rds-stack-DBPassword'}
+          DB_USERNAME: {'Fn::ImportValue': 'postgres-rds-stack-DBUsername'}
+          DB_HOST: {'Fn::ImportValue': 'postgres-rds-stack-DNSName'}
+          DB_PORT: !Ref DBPort
+          DB_DIALECT: !Ref DBDialect
+          DB_POOL_MAX: !Ref DBPOOLMAX
+          DB_POOL_MIN: !Ref DBPOOLMIN
+          DB_POOL_IDLE_TIMEOUT_MILLIS: !Ref DBPOOLIDLETIMEOUTMILLIS
+
+          #SECRET_NAME: {'Fn::ImportValue': 'rds-stack-RDSSecretKey'}
       VpcConfig:
         SecurityGroupIds:
           - !GetAtt
             - VPCLambdaSecurityGroup
             - GroupId
-        SubnetIds: {'Fn::ImportValue': 'users-stack-SubnetsPublic'}
+        SubnetIds: !Split [',', {'Fn::ImportValue': !Sub '${ParentStackName}-SubnetsPublic'}]
 
   CreateUserApiMethod:
     Type: 'AWS::ApiGateway::Method'
@@ -285,6 +300,7 @@ Resources:
       ResourceId: !Ref UsersResource
       RestApiId: !Ref ApiGatewayRestApi
       AuthorizationType: NONE
+      ApiKeyRequired: true
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
@@ -315,6 +331,7 @@ Resources:
 
   LambdaGetUser:
     Type: 'AWS::Lambda::Function'
+    DependsOn: [ModelsLayer, UtilsLayer]
     Properties:
       FunctionName: !Join
         - ''
@@ -332,23 +349,35 @@ Resources:
           - ''
           - - !Ref ReleaseVersion
             - /get-user-service.zip
+      Layers: [!Ref ModelsLayer, !Ref UtilsLayer]
       Environment:
         Variables:
-          SECRET_NAME: {'Fn::ImportValue': 'rds-stack-RDSSecretKey'}
+          DB_NAME: {'Fn::ImportValue': 'postgres-rds-stack-DBName'}
+          DB_PASSWORD: {'Fn::ImportValue': 'postgres-rds-stack-DBPassword'}
+          DB_USERNAME: {'Fn::ImportValue': 'postgres-rds-stack-DBUsername'}
+          DB_HOST: {'Fn::ImportValue': 'postgres-rds-stack-DNSName'}
+          DB_PORT: !Ref DBPort
+          DB_DIALECT: !Ref DBDialect
+          DB_POOL_MAX: !Ref DBPOOLMAX
+          DB_POOL_MIN: !Ref DBPOOLMIN
+          DB_POOL_IDLE_TIMEOUT_MILLIS: !Ref DBPOOLIDLETIMEOUTMILLIS
+
+          #SECRET_NAME: {'Fn::ImportValue': 'rds-stack-RDSSecretKey'}
       VpcConfig:
         SecurityGroupIds:
           - !GetAtt
             - VPCLambdaSecurityGroup
             - GroupId
-        SubnetIds: {'Fn::ImportValue': 'users-stack-SubnetsPublic'}
+        SubnetIds: !Split [',', {'Fn::ImportValue': !Sub '${ParentStackName}-SubnetsPublic'}]
 
   GetUserApiMethod:
     Type: 'AWS::ApiGateway::Method'
     Properties:
       HttpMethod: GET
-      ResourceId: !Ref UsersResource
+      ResourceId: !Ref UsersIdResource
       RestApiId: !Ref ApiGatewayRestApi
       AuthorizationType: NONE
+      ApiKeyRequired: true
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: GET
@@ -379,6 +408,7 @@ Resources:
 
   LambdaDeleteUser:
     Type: 'AWS::Lambda::Function'
+    DependsOn: [ModelsLayer, UtilsLayer]
     Properties:
       FunctionName: !Join
         - ''
@@ -396,23 +426,35 @@ Resources:
           - ''
           - - !Ref ReleaseVersion
             - /delete-user-service.zip
+      Layers: [!Ref ModelsLayer, !Ref UtilsLayer]
       Environment:
         Variables:
-          SECRET_NAME: {'Fn::ImportValue': 'rds-stack-RDSSecretKey'}
+          DB_NAME: {'Fn::ImportValue': 'postgres-rds-stack-DBName'}
+          DB_PASSWORD: {'Fn::ImportValue': 'postgres-rds-stack-DBPassword'}
+          DB_USERNAME: {'Fn::ImportValue': 'postgres-rds-stack-DBUsername'}
+          DB_HOST: {'Fn::ImportValue': 'postgres-rds-stack-DNSName'}
+          DB_PORT: !Ref DBPort
+          DB_DIALECT: !Ref DBDialect
+          DB_POOL_MAX: !Ref DBPOOLMAX
+          DB_POOL_MIN: !Ref DBPOOLMIN
+          DB_POOL_IDLE_TIMEOUT_MILLIS: !Ref DBPOOLIDLETIMEOUTMILLIS
+
+          #SECRET_NAME: {'Fn::ImportValue': 'rds-stack-RDSSecretKey'}
       VpcConfig:
         SecurityGroupIds:
           - !GetAtt
             - VPCLambdaSecurityGroup
             - GroupId
-        SubnetIds: {'Fn::ImportValue': 'users-stack-SubnetsPublic'}
+        SubnetIds: !Split [',', {'Fn::ImportValue': !Sub '${ParentStackName}-SubnetsPublic'}]
 
   DeleteUserApiMethod:
     Type: 'AWS::ApiGateway::Method'
     Properties:
       HttpMethod: DELETE
-      ResourceId: !Ref UsersResource
+      ResourceId: !Ref UsersIdResource
       RestApiId: !Ref ApiGatewayRestApi
       AuthorizationType: NONE
+      ApiKeyRequired: true
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: DELETE
@@ -441,23 +483,136 @@ Resources:
       MethodResponses:
         - StatusCode: '200'
 
-
-
-  VPCRDSSecurityGroup:
-    Type: 'AWS::EC2::SecurityGroup'
-    DependsOn: VPCLambdaSecurityGroup
+  LambdaDBInit:
+    Type: 'AWS::Lambda::Function'
+    DependsOn: [ModelsLayer, UtilsLayer]
     Properties:
-      GroupDescription: !Join
+      FunctionName: !Join
         - ''
         - - !Ref ParentStackName
-          - ' VPC Security Group for RDS'
-      VpcId: {'Fn::ImportValue': 'users-stack-VPC'}
-      Tags:
-        - Key: Name
-          Value: !Join
+          - '-db-init'
+      Description: A lambda function for initialize db
+      Runtime: !Ref LambdaFunctionRuntime
+      Handler: index.handler
+      Role: !GetAtt
+        - LambdaExecutionRole
+        - Arn
+      Code:
+        S3Bucket: !Ref ReleaseS3BucketName
+        S3Key: !Join
+          - ''
+          - - !Ref ReleaseVersion
+            - /db-init-service.zip
+      Layers: [!Ref ModelsLayer, !Ref UtilsLayer]
+      Environment:
+        Variables:
+          DB_NAME: {'Fn::ImportValue': 'postgres-rds-stack-DBName'}
+          DB_PASSWORD: {'Fn::ImportValue': 'postgres-rds-stack-DBPassword'}
+          DB_USERNAME: {'Fn::ImportValue': 'postgres-rds-stack-DBUsername'}
+          DB_HOST: {'Fn::ImportValue': 'postgres-rds-stack-DNSName'}
+          DB_PORT: !Ref DBPort
+          DB_DIALECT: !Ref DBDialect
+          DB_POOL_MAX: !Ref DBPOOLMAX
+          DB_POOL_MIN: !Ref DBPOOLMIN
+          DB_POOL_IDLE_TIMEOUT_MILLIS: !Ref DBPOOLIDLETIMEOUTMILLIS
+
+          #SECRET_NAME: {'Fn::ImportValue': 'rds-stack-RDSSecretKey'}
+      VpcConfig:
+        SecurityGroupIds:
+          - !GetAtt
+            - VPCLambdaSecurityGroup
+            - GroupId
+        SubnetIds: !Split [',', {'Fn::ImportValue': !Sub '${ParentStackName}-SubnetsPublic'}]
+
+  DBInitApiMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      HttpMethod: PUT
+      ResourceId: !Ref UsersResource
+      RestApiId: !Ref ApiGatewayRestApi
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: PUT
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        RequestTemplates:
+          application/json: !Join
             - ''
-            - - !Ref ParentStackName
-              - _RDS_SecurityGroup
+            - - '{'
+              - "\t\"context\" : {\n"
+              - "\t\t\"action-name\" : \"DeleteUserApiMethod\",\n"
+              - "\t\t\"sub\" : \"$context.authorizer.claims.sub\",\n"
+              - "\t\t\"email\" : \"$context.authorizer.claims.email\"\n"
+              - "\t}\n"
+              - '}'
+        IntegrationResponses:
+          - StatusCode: '200'
+        Uri: !Join
+          - ''
+          - - 'arn:aws:apigateway:'
+            - !Ref 'AWS::Region'
+            - ':lambda:path/2015-03-31/functions/'
+            - !GetAtt
+              - LambdaDBInit
+              - Arn
+            - /invocations
+      MethodResponses:
+        - StatusCode: '200'
+
+  LambdaPermissionForCreateUser:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Ref: LambdaCreateUser
+      Principal: apigateway.amazonaws.com
+      SourceArn:
+        Fn::Join:
+          - ''
+          - - 'arn:aws:execute-api:'
+            - !Ref 'AWS::Region'
+            - ":"
+            - !Ref 'AWS::AccountId'
+            - ":"
+            - !Ref ApiGatewayRestApi
+            - "/*/POST/*"
+
+  LambdaPermissionForGetUser:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Ref: LambdaGetUser
+      Principal: apigateway.amazonaws.com
+      SourceArn:
+        Fn::Join:
+          - ''
+          - - 'arn:aws:execute-api:'
+            - !Ref 'AWS::Region'
+            - ":"
+            - !Ref 'AWS::AccountId'
+            - ":"
+            - !Ref ApiGatewayRestApi
+            - "/*/GET/*"
+
+  LambdaPermissionForDeleteUser:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Ref: LambdaDeleteUser
+      Principal: apigateway.amazonaws.com
+      SourceArn:
+        Fn::Join:
+          - ''
+          - - 'arn:aws:execute-api:'
+            - !Ref 'AWS::Region'
+            - ":"
+            - !Ref 'AWS::AccountId'
+            - ":"
+            - !Ref ApiGatewayRestApi
+            - "/*/DELETE/*"
+
 
   VPCLambdaSecurityGroup:
     Type: 'AWS::EC2::SecurityGroup'
@@ -466,7 +621,7 @@ Resources:
         - ''
         - - !Ref ParentStackName
           - ' VPC Security Group for Lambda'
-      VpcId: {'Fn::ImportValue': 'users-stack-VPC'}
+      VpcId: {'Fn::ImportValue': !Sub '${ParentStackName}-VPC'}
       Tags:
         - Key: Name
           Value: !Join

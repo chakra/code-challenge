@@ -6,12 +6,9 @@
   "scripts": {
     "test": "env KEY=test ./node_modules/.bin/mocha --recursive --reporter spec"
   },
-  "dependencies": {
-    "layer": "file:\\Users//CB//Projects//coates//code-challenge//LambdaLayers//layers-1.0.0.tar.gz"
-  },
   "devDependencies": {
     "chai": "^3.5.0",
-    "mocha": "^2.5.3",
+    "mocha": "^6.1.4",
     "sinon": "^6.3.1"
   },
   "author": "CB",
